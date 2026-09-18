@@ -1,0 +1,24 @@
+# ai-infra
+
+One local home for three kinds of Agent infrastructure:
+
+```text
+control/              safe maintenance tools
+content/skills/       shared Skills
+content/settings/     global rules, settings, and hooks
+content/subagent/     persona/subagent source and imported definitions
+state/                private local state, backups, and receipts (Git-ignored)
+```
+
+The installer preserved every replaced original as a timestamped sibling backup. It did not create a Git commit, remote, or public repository.
+
+## Daily maintenance
+
+- Add a Skill: `control/bin/new-skill.sh <name> "description"`
+- Rebuild the index: `python3 -B control/bin/rebuild-claude-md.py`
+- Validate Skills: `bash control/bin/validate-skills.sh`
+- Repair missing links: `bash control/bin/link-local.sh`
+
+`link-local.sh` never imports or replaces an unexpected existing path. Inventory and migration belong to the `kgm-ai-infra-quickstart` Skill so they always use a reviewed plan digest.
+
+If installation was interrupted by a crash or power loss, do not relink manually. Run the Skill's `scripts/scaffold.py --recover-root <this-folder>` command so it validates the private write-ahead journal and restores the original paths.

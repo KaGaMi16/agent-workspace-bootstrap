@@ -1,0 +1,19 @@
+# ai-infra rules
+
+This folder is the local control plane for shared Agent assets.
+
+## Boundaries
+
+- Portable source lives only in `content/skills`, `content/settings`, and `content/subagent`.
+- Credentials, authentication, private memory, backups, receipts, and machine state live only in `state/` and never enter Git.
+- Generated caches and host-specific runtime files are not source.
+- Do not scan the whole home directory. Extend the registered host inventory deliberately and test it.
+- Do not resolve conflicting assets by guessing. Stop and ask the owner.
+- Do not commit, add a remote, push, or publish without separate user approval.
+
+## Maintenance
+
+- Add a Skill with `control/bin/new-skill.sh`.
+- Rebuild the Skill index with `python3 -B control/bin/rebuild-claude-md.py`.
+- Validate Skills with `bash control/bin/validate-skills.sh`.
+- Repair only missing links with `bash control/bin/link-local.sh`; it refuses to replace unexpected paths.

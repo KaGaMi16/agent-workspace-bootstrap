@@ -1,6 +1,6 @@
-# ai-infra
+# KGM agent workspace
 
-One local home for three kinds of Agent infrastructure:
+One local home for three kinds of agent assets:
 
 ```text
 control/              safe maintenance tools
@@ -19,6 +19,6 @@ The installer preserved every replaced original as a timestamped sibling backup.
 - Validate Skills: `bash control/bin/validate-skills.sh`
 - Repair missing links: `bash control/bin/link-local.sh`
 
-`link-local.sh` never imports or replaces an unexpected existing path. Inventory and migration belong to the `kgm-ai-infra-quickstart` Skill so they always use a reviewed plan digest.
+`link-local.sh` never imports or replaces an unexpected existing path. Inventory and migration belong to the `kgm-agent-workspace-bootstrap` Skill so they always use a reviewed plan digest.
 
 If installation was interrupted by a crash or power loss, do not relink manually. Run the Skill's `scripts/scaffold.py --recover-root <this-folder>` command so it validates the private write-ahead journal and restores the original paths.

@@ -14,16 +14,18 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from preflight import BLOCKED, DRY, MIGRATE, build_report  # noqa: E402
+from preflight import BLOCKED, DRY, MIGRATE, PORTABLE_SPECS, build_report, resolve_root, source_path  # noqa: E402
 from scaffold import ApplyError, verify_live_record  # noqa: E402
 
 
 @contextmanager
-def clean_ai_infra_env(home: Path):
+def clean_agent_workspace_env(home: Path):
     original = dict(os.environ)
     try:
         for key in list(os.environ):
-            if key == "AI_INFRA_HOME" or key.startswith("AI_INFRA_SOURCE_"):
+            if key in {"KGM_AGENT_WORKSPACE_HOME", "AI_INFRA_HOME"} or key.startswith(
+                ("KGM_AGENT_SOURCE_", "AI_INFRA_SOURCE_")
+            ):
                 os.environ.pop(key, None)
         os.environ["HOME"] = str(home)
         yield
@@ -34,7 +36,7 @@ def clean_ai_infra_env(home: Path):
 
 class QuickstartTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory(prefix="ai-infra-quickstart-")
+        self.temp = tempfile.TemporaryDirectory(prefix="agent-workspace-bootstrap-")
         self.base = Path(self.temp.name).resolve()
         self.home = self.base / "home"
         self.home.mkdir()
@@ -43,7 +45,7 @@ class QuickstartTests(unittest.TestCase):
         self.temp.cleanup()
 
     def plan(self) -> dict:
-        with clean_ai_infra_env(self.home):
+        with clean_agent_workspace_env(self.home):
             return build_report(self.home)
 
     def write_plan(self, plan: dict) -> Path:
@@ -54,7 +56,9 @@ class QuickstartTests(unittest.TestCase):
     def run_script(self, name: str, *args: str) -> subprocess.CompletedProcess:
         env = dict(os.environ)
         for key in list(env):
-            if key == "AI_INFRA_HOME" or key.startswith("AI_INFRA_SOURCE_"):
+            if key in {"KGM_AGENT_WORKSPACE_HOME", "AI_INFRA_HOME"} or key.startswith(
+                ("KGM_AGENT_SOURCE_", "AI_INFRA_SOURCE_")
+            ):
                 env.pop(key, None)
         env["HOME"] = str(self.home)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -99,7 +103,7 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(plan["verdict"], DRY)
         applied = self.apply(plan)
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-        root = self.home / "ai-infra"
+        root = self.home / "kgm-agent-workspace"
         self.assertTrue((root / "control/bin/link-local.sh").is_file())
         self.assertTrue((root / "content/skills").is_dir())
         self.assertTrue((root / "content/settings").is_dir())
@@ -113,6 +117,39 @@ class QuickstartTests(unittest.TestCase):
         doctor = self.run_script("doctor.py", "--home", str(self.home))
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
 
+    def test_root_override_priority_and_legacy_alias(self) -> None:
+        canonical = self.base / "canonical-workspace"
+        legacy = self.base / "legacy-workspace"
+        with clean_agent_workspace_env(self.home):
+            self.assertEqual(resolve_root(self.home), self.home / "kgm-agent-workspace")
+            os.environ["AI_INFRA_HOME"] = str(legacy)
+            self.assertEqual(resolve_root(self.home), legacy)
+            os.environ["KGM_AGENT_WORKSPACE_HOME"] = str(canonical)
+            self.assertEqual(resolve_root(self.home), canonical)
+
+    def test_source_override_priority_and_legacy_alias(self) -> None:
+        spec = next(item for item in PORTABLE_SPECS if item.key == "claude_md")
+        canonical = self.base / "canonical-CLAUDE.md"
+        legacy = self.base / "legacy-CLAUDE.md"
+        with clean_agent_workspace_env(self.home):
+            os.environ["AI_INFRA_SOURCE_CLAUDE_MD"] = str(legacy)
+            self.assertEqual(source_path(self.home, spec), legacy)
+            os.environ["KGM_AGENT_SOURCE_CLAUDE_MD"] = str(canonical)
+            self.assertEqual(source_path(self.home, spec), canonical)
+
+    def test_existing_ai_infra_directory_is_not_auto_adopted(self) -> None:
+        legacy_or_other_project = self.home / "ai-infra"
+        nacos = legacy_or_other_project / "nacos"
+        nacos.mkdir(parents=True)
+        marker = nacos / "do-not-touch.txt"
+        marker.write_text("other project\n", encoding="utf-8")
+        plan = self.plan()
+        self.assertEqual(plan["ai_infra_root"], str(self.home / "kgm-agent-workspace"))
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "other project\n")
+        self.assertTrue((self.home / "kgm-agent-workspace").is_dir())
+
     def test_migrates_portable_assets_and_preserves_backups(self) -> None:
         self.make_skill(self.home / ".claude/skills", "sample-skill")
         claude_md = self.home / ".claude/CLAUDE.md"
@@ -122,7 +159,7 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(plan["verdict"], MIGRATE)
         applied = self.apply(plan)
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-        root = self.home / "ai-infra"
+        root = self.home / "kgm-agent-workspace"
         self.assertTrue((root / "content/skills/sample-skill/SKILL.md").is_file())
         self.assertEqual((root / "content/settings/claude/CLAUDE.md").read_text(), "# Existing rules\n")
         self.assertTrue(claude_md.is_symlink())
@@ -134,7 +171,7 @@ class QuickstartTests(unittest.TestCase):
         plan = self.plan()
         self.assertEqual(plan["verdict"], BLOCKED)
         self.assertTrue(any(item["kind"] == "skill-entry-conflict" for item in plan["blockers"]))
-        self.assertFalse((self.home / "ai-infra").exists())
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
 
     def test_sensitive_setting_blocks_and_value_is_not_reported(self) -> None:
         secret = "sk-" + ("A" * 24)
@@ -195,11 +232,11 @@ class QuickstartTests(unittest.TestCase):
         alias.symlink_to(external, target_is_directory=True)
         aliased_home = alias / "home"
         (external / "home").mkdir()
-        with clean_ai_infra_env(aliased_home):
+        with clean_agent_workspace_env(aliased_home):
             plan = build_report(aliased_home)
         self.assertEqual(plan["verdict"], BLOCKED)
         self.assertIn("symlink-ancestor", json.dumps(plan))
-        self.assertFalse((external / "home/ai-infra").exists())
+        self.assertFalse((external / "home/kgm-agent-workspace").exists())
 
     def test_group_writable_host_parent_blocks(self) -> None:
         parent = self.home / ".claude"
@@ -209,13 +246,13 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(plan["verdict"], BLOCKED)
         self.assertIn("group-writable-parent", json.dumps(plan))
 
-    def test_untrusted_ai_infra_root_parent_blocks_without_writes(self) -> None:
+    def test_untrusted_agent_workspace_root_parent_blocks_without_writes(self) -> None:
         shared = self.base / "shared"
         shared.mkdir()
         shared.chmod(0o777)
-        target = shared / "ai-infra"
-        with clean_ai_infra_env(self.home):
-            os.environ["AI_INFRA_HOME"] = str(target)
+        target = shared / "kgm-agent-workspace"
+        with clean_agent_workspace_env(self.home):
+            os.environ["KGM_AGENT_WORKSPACE_HOME"] = str(target)
             plan = build_report(self.home)
         self.assertEqual(plan["verdict"], BLOCKED)
         self.assertIn("untrusted-root", json.dumps(plan))
@@ -282,7 +319,7 @@ class QuickstartTests(unittest.TestCase):
         applied = self.apply(plan)
         self.assertNotEqual(applied.returncode, 0)
         self.assertIn("snapshot changed", applied.stderr)
-        self.assertFalse((self.home / "ai-infra").exists())
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
 
     def test_per_link_verification_rejects_late_source_drift(self) -> None:
         claude_md = self.home / ".claude/CLAUDE.md"
@@ -306,7 +343,7 @@ class QuickstartTests(unittest.TestCase):
         )
         self.assertNotEqual(applied.returncode, 0)
         self.assertIn("approval digest does not match", applied.stderr)
-        self.assertFalse((self.home / "ai-infra").exists())
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
 
     def test_injected_failure_restores_originals_and_clears_live_root(self) -> None:
         claude_md = self.home / ".claude/CLAUDE.md"
@@ -318,8 +355,8 @@ class QuickstartTests(unittest.TestCase):
         self.assertTrue(claude_md.is_file())
         self.assertFalse(claude_md.is_symlink())
         self.assertEqual(claude_md.read_text(), "original\n")
-        self.assertFalse((self.home / "ai-infra").exists())
-        failed = list(self.home.glob(".ai-infra.failed.*"))
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
+        failed = list(self.home.glob(".kgm-agent-workspace.failed.*"))
         self.assertEqual(len(failed), 1)
         journal = json.loads((failed[0] / "state/transaction.json").read_text())
         self.assertEqual(journal["status"], "ROLLED_BACK")
@@ -334,8 +371,8 @@ class QuickstartTests(unittest.TestCase):
         self.assertTrue(claude_md.is_file())
         self.assertFalse(claude_md.is_symlink())
         self.assertEqual(claude_md.read_text(), "original\n")
-        self.assertFalse((self.home / "ai-infra").exists())
-        failed = list(self.home.glob(".ai-infra.failed.*"))
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
+        failed = list(self.home.glob(".kgm-agent-workspace.failed.*"))
         self.assertEqual(len(failed), 1)
         journal = json.loads((failed[0] / "state/transaction.json").read_text())
         self.assertEqual(journal["status"], "ROLLED_BACK")
@@ -347,14 +384,14 @@ class QuickstartTests(unittest.TestCase):
         plan = self.plan()
         crashed = self.apply(plan, "--crash-after-backup", "1")
         self.assertEqual(crashed.returncode, 88)
-        root = self.home / "ai-infra"
+        root = self.home / "kgm-agent-workspace"
         self.assertTrue(root.is_dir())
         self.assertFalse(claude_md.exists())
         doctor = self.run_script("doctor.py", "--home", str(self.home))
         self.assertNotEqual(doctor.returncode, 0)
         alias = self.base / "home-alias"
         alias.symlink_to(self.home, target_is_directory=True)
-        refused = self.run_script("scaffold.py", "--recover-root", str(alias / "ai-infra"))
+        refused = self.run_script("scaffold.py", "--recover-root", str(alias / "kgm-agent-workspace"))
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("recovery root has a symlinked", refused.stderr)
         self.assertFalse(claude_md.exists())
@@ -689,7 +726,7 @@ class QuickstartTests(unittest.TestCase):
         target.write_text("keep me\n", encoding="utf-8")
         earlier = self.home / ".claude/skills"
         earlier.unlink()
-        link_script = self.home / "ai-infra/control/bin/link-local.sh"
+        link_script = self.home / "kgm-agent-workspace/control/bin/link-local.sh"
         result = subprocess.run(
             ["bash", str(link_script)],
             text=True,
@@ -709,7 +746,7 @@ class QuickstartTests(unittest.TestCase):
         first = self.home / ".claude/skills"
         first.unlink()
         (self.home / ".claude").chmod(0o775)
-        link_script = self.home / "ai-infra/control/bin/link-local.sh"
+        link_script = self.home / "kgm-agent-workspace/control/bin/link-local.sh"
         result = subprocess.run(
             ["bash", str(link_script)],
             text=True,

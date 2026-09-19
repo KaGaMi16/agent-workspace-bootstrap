@@ -4,7 +4,7 @@ The inventory is intentionally bounded. It does not crawl the whole home directo
 
 ## Supported portable paths
 
-| Host | Source | Destination under `~/ai-infra` |
+| Host | Source | Destination under `~/kgm-agent-workspace` |
 | --- | --- | --- |
 | Claude | `~/.claude/skills` | `content/skills` |
 | Claude | `~/.claude/CLAUDE.md` | `content/settings/claude/CLAUDE.md` |
@@ -31,4 +31,3 @@ The inventory is intentionally bounded. It does not crawl the whole home directo
 - `~/.kimi`, `~/.config/kimi`, `~/.config/opencode`
 
 These paths are reported but never moved or linked. Add a new host only after its source-of-truth behavior and round-trip tests are documented.
-

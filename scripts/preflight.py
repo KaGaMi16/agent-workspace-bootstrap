@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only inventory and migration-plan generator for ai-infra quickstart.
+"""Read-only inventory and migration-plan generator for an agent workspace.
 
 Exit codes: 0=DRY, 3=MIGRATE, 1=BLOCKED, 2=usage error.
 """
@@ -65,13 +65,14 @@ MANUAL_SPECS = (
 
 
 def resolve_root(home: Path) -> Path:
-    raw = os.environ.get("AI_INFRA_HOME")
-    return Path(raw).expanduser().absolute() if raw else home / "ai-infra"
+    raw = os.environ.get("KGM_AGENT_WORKSPACE_HOME") or os.environ.get("AI_INFRA_HOME")
+    return Path(raw).expanduser().absolute() if raw else home / "kgm-agent-workspace"
 
 
 def source_path(home: Path, spec: AssetSpec) -> Path:
-    env_key = f"AI_INFRA_SOURCE_{spec.key.upper()}"
-    raw = os.environ.get(env_key)
+    canonical_key = f"KGM_AGENT_SOURCE_{spec.key.upper()}"
+    legacy_key = f"AI_INFRA_SOURCE_{spec.key.upper()}"
+    raw = os.environ.get(canonical_key) or os.environ.get(legacy_key)
     return Path(raw).expanduser().absolute() if raw else home / spec.relative
 
 
@@ -400,7 +401,7 @@ def build_report(home: Path) -> dict:
 
 
 def print_report(report: dict) -> None:
-    print(f"ai-infra root: {report['ai_infra_root']} -> {report['root_status']}")
+    print(f"agent workspace root: {report['ai_infra_root']} -> {report['root_status']}")
     for group, title in (
         (report["portable_assets"], "portable"),
         (report["private_assets"], "private (leave in place)"),

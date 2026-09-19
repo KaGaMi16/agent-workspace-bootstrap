@@ -1,7 +1,6 @@
 interface:
-  display_name: "AI Infra Quickstart"
-  short_description: "Safely build and consolidate local agent infrastructure"
-  default_prompt: "Use $kgm-ai-infra-quickstart to inventory this machine and show the exact migration plan before changing files."
+  display_name: "KGM Agent Workspace Bootstrap"
+  short_description: "Safely build and consolidate a local agent workspace"
+  default_prompt: "Use $kgm-agent-workspace-bootstrap to inventory this machine and show the exact migration plan before changing files."
 policy:
   allow_implicit_invocation: true
-

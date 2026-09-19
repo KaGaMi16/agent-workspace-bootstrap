@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only verification for a scaffolded ai-infra v2 tree."""
+"""Read-only verification for a scaffolded agent workspace."""
 from __future__ import annotations
 
 import argparse
@@ -42,7 +42,7 @@ def main() -> int:
     root = resolve_root(home)
     results = Results()
 
-    results.check("ai-infra root exists", root.is_dir() and not root.is_symlink(), str(root))
+    results.check("agent workspace root exists", root.is_dir() and not root.is_symlink(), str(root))
     required = [
         "control/bin/link-local.sh",
         "control/bin/new-skill.sh",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply one explicitly approved ai-infra preflight plan.
+"""Apply one explicitly approved agent-workspace preflight plan.
 
 No commit, remote, push, publication, credential migration, or deletion occurs.
 """
@@ -405,7 +405,7 @@ def main() -> int:
         root_findings = parent_trust_findings(Path(plan["home"]), root)
         if root_findings:
             labels = ", ".join(sorted({item["label"] for item in root_findings}))
-            raise ApplyError(f"untrusted ai-infra root parent: {labels}")
+            raise ApplyError(f"untrusted agent workspace root parent: {labels}")
         staging = root.with_name(f".{root.name}.staging.{plan['plan_digest'][:12]}")
         if staging.exists() or staging.is_symlink():
             raise ApplyError(f"staging path already exists: {staging}")
@@ -454,7 +454,7 @@ def main() -> int:
             raise
 
         backups = [item["backup"] for item in journal["operations"] if item["backup"]]
-        print(f"DONE: ai-infra installed at {root}")
+        print(f"DONE: agent workspace installed at {root}")
         print(f"transaction: {journal['status']} ({len(journal['operations'])} link operation(s))")
         print(f"backups preserved: {len(backups)}")
         print("No Git commit, remote, push, or publication was performed.")

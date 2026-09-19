@@ -407,6 +407,137 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((output / ".git").exists())
 
+    def test_public_export_excludes_runtime_caches_from_output(self) -> None:
+        copied_skill = self.base / "copied-skill"
+        shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))
+        (copied_skill / "scripts/__pycache__").mkdir(exist_ok=True)
+        (copied_skill / "scripts/__pycache__/module.pyc").write_bytes(b"runtime cache")
+        (copied_skill / "tests/.pytest_cache").mkdir(exist_ok=True)
+        (copied_skill / "tests/.pytest_cache/state").write_text("runtime cache\n", encoding="utf-8")
+        (copied_skill / "references/.DS_Store").write_bytes(b"runtime cache")
+        (copied_skill / ".pytest_cache").mkdir(exist_ok=True)
+        (copied_skill / ".pytest_cache/state").write_text("runtime cache\n", encoding="utf-8")
+        output = self.base / "public-skill"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(copied_skill / "scripts/export_public.py"),
+                "--output",
+                str(output),
+                "--github-handle",
+                self.export_handle(),
+            ],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(any(path.name in {"__pycache__", ".pytest_cache", ".DS_Store"} for path in output.rglob("*")))
+        self.assertFalse(any(path.suffix == ".pyc" for path in output.rglob("*")))
+
+    def test_public_export_blocks_cache_named_symlink(self) -> None:
+        copied_skill = self.base / "copied-skill"
+        shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))
+        outside = self.base / "outside.txt"
+        outside.write_text("benign external text\n", encoding="utf-8")
+        (copied_skill / "references/evil.pyc").symlink_to(outside)
+        output = self.base / "public-skill"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(copied_skill / "scripts/export_public.py"),
+                "--output",
+                str(output),
+                "--github-handle",
+                self.export_handle(),
+            ],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("source package scan failed", result.stdout)
+        self.assertFalse(output.exists())
+
+    def test_public_export_blocks_root_cache_named_symlink(self) -> None:
+        copied_skill = self.base / "copied-skill"
+        shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))
+        outside = self.base / "outside"
+        outside.mkdir()
+        (copied_skill / ".pytest_cache").symlink_to(outside, target_is_directory=True)
+        output = self.base / "public-skill"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(copied_skill / "scripts/export_public.py"),
+                "--output",
+                str(output),
+                "--github-handle",
+                self.export_handle(),
+            ],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected top-level paths: .pytest_cache", result.stdout)
+        self.assertFalse(output.exists())
+
+    def test_public_export_blocks_group_writable_runtime_caches(self) -> None:
+        for index, relative in enumerate((Path(".pytest_cache"), Path("references/__pycache__")), start=1):
+            with self.subTest(relative=relative.as_posix()):
+                copied_skill = self.base / f"copied-skill-{index}"
+                shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))
+                cache = copied_skill / relative
+                cache.mkdir(parents=True, exist_ok=True)
+                cache.chmod(0o775)
+                output = self.base / f"public-skill-{index}"
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-B",
+                        str(copied_skill / "scripts/export_public.py"),
+                        "--output",
+                        str(output),
+                        "--github-handle",
+                        self.export_handle(),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+
+    def test_public_export_blocks_cache_directory_names_used_as_files(self) -> None:
+        for index, relative in enumerate((Path(".pytest_cache"), Path("references/__pycache__")), start=1):
+            with self.subTest(relative=relative.as_posix()):
+                copied_skill = self.base / f"copied-skill-file-{index}"
+                shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))
+                artifact = copied_skill / relative
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text("not a cache directory\n", encoding="utf-8")
+                output = self.base / f"public-skill-file-{index}"
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-B",
+                        str(copied_skill / "scripts/export_public.py"),
+                        "--output",
+                        str(output),
+                        "--github-handle",
+                        self.export_handle(),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+
     def test_public_export_blocks_git_metadata_inside_allowlisted_content(self) -> None:
         copied_skill = self.base / "copied-skill"
         shutil.copytree(SKILL_ROOT, copied_skill, ignore=shutil.ignore_patterns(".git"))

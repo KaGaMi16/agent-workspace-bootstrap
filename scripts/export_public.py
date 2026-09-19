@@ -31,6 +31,7 @@ ALLOWED_TOP_LEVEL = {
 }
 HANDLE_RE = re.compile(r"^(?!-)(?!.*--)[A-Za-z0-9-]{1,39}(?<!-)$")
 PLACEHOLDER = "<YOUR_" + "GITHUB_HANDLE>"
+IGNORED_SOURCE_ARTIFACT_NAMES = {".DS_Store", "__pycache__", ".pytest_cache"}
 
 
 class ExportError(RuntimeError):
@@ -60,8 +61,32 @@ def validate_output_parent(path: Path) -> None:
         raise ExportError(f"output parent is group/world writable: {current}")
 
 
+def is_trusted_ignored_artifact(path: Path, relative: Path) -> bool:
+    info = path.lstat()
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        return False
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return False
+    if relative.name in {"__pycache__", ".pytest_cache"}:
+        return stat.S_ISDIR(info.st_mode)
+    if any(part in {"__pycache__", ".pytest_cache"} for part in relative.parts):
+        return stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)
+    return (relative.name == ".DS_Store" or relative.suffix == ".pyc") and stat.S_ISREG(info.st_mode)
+
+
+def is_ignored_root_artifact(path: Path) -> bool:
+    try:
+        return path.name in IGNORED_SOURCE_ARTIFACT_NAMES and is_trusted_ignored_artifact(path, Path(path.name))
+    except OSError:
+        return False
+
+
 def validate_source(source: Path) -> None:
-    actual = {path.name for path in source.iterdir() if path.name not in {"__pycache__", ".DS_Store", ".git"}}
+    actual = {
+        path.name
+        for path in source.iterdir()
+        if path.name != ".git" and not is_ignored_root_artifact(path)
+    }
     unexpected = sorted(actual - ALLOWED_TOP_LEVEL)
     missing = sorted({"SKILL.md", "README.md", "LICENSE", "SECURITY.md"} - actual)
     git_metadata = source / ".git"
@@ -75,12 +100,22 @@ def validate_source(source: Path) -> None:
         raise ExportError(f"missing required paths: {', '.join(missing)}")
 
 
+def is_ignored_source_artifact(root: Path, finding: dict[str, str]) -> bool:
+    relative = Path(finding["path"])
+    path = root / relative if root.is_dir() else root
+    try:
+        trusted = is_trusted_ignored_artifact(path, relative)
+    except OSError:
+        return False
+    return finding["label"] == "generated-artifact" and trusted
+
+
 def scan_allowlisted_source(source: Path) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     for top_name in sorted(ALLOWED_TOP_LEVEL):
         path = source / top_name
         if path.exists() or path.is_symlink():
-            findings.extend(scan_path(path))
+            findings.extend(item for item in scan_path(path) if not is_ignored_source_artifact(path, item))
     return findings
 
 
@@ -110,7 +145,7 @@ def copy_allowlisted(source: Path, output: Path) -> None:
                 src,
                 dest,
                 symlinks=True,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", ".pytest_cache"),
+                ignore=shutil.ignore_patterns(*sorted(IGNORED_SOURCE_ARTIFACT_NAMES), "*.pyc"),
             )
         elif src.is_file():
             shutil.copy2(src, dest)

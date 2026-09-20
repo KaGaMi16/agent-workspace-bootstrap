@@ -1,6 +1,6 @@
 interface:
   display_name: "KGM Agent Workspace Bootstrap"
-  short_description: "Safely build and consolidate a local agent workspace"
+  short_description: "Build a safe Claude, Codex, Hermes, and Kimi-ready workspace"
   default_prompt: "Use $kgm-agent-workspace-bootstrap to inventory this machine and show the exact migration plan before changing files."
 policy:
   allow_implicit_invocation: true

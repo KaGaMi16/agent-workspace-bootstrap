@@ -1,0 +1,25 @@
+---
+name: kgm-kimi-agent-workspace-bridge
+description: "Use from Kimi to discover and read portable Skills, shared rule documents, and Markdown subagent/persona sources in a KGM agent workspace without reading runtime configuration, private state, or Kimi account data."
+---
+
+# KGM Agent Workspace Bridge for Kimi
+
+Use this Skill as Kimi's single, read-only bridge into a KGM agent workspace.
+
+## Workflow
+
+1. Resolve `scripts/workspace_catalog.py` relative to this `SKILL.md`, then run it with `python3 -B <this-skill-directory>/scripts/workspace_catalog.py --json`. If the workspace uses a non-default root, set `KGM_AGENT_WORKSPACE_HOME` or pass `--root` with the owner-approved root.
+2. Select only paths returned by the catalog. Paths are relative to the workspace root. The catalog exposes Skill manifests, four shared rule documents, and Markdown persona/subagent files; runtime configuration is intentionally excluded.
+3. For a shared Skill, open its returned `SKILL.md` and follow it for the current request.
+4. For cross-agent rules, prefer `content/settings/agents/AGENTS.md`. Read host-specific settings only when the user explicitly asks.
+5. For a persona or subagent, open only the selected returned file under `content/subagent/`; do not scan sibling machine directories.
+
+## Hard boundaries
+
+- Never read or enumerate `state/`, `.kimi`, credentials, authentication, history, telemetry, device identifiers, backups, receipts, or Git metadata.
+- Never open runtime configuration such as `settings.json` or `config.toml`; it is outside the allowlist even though another host may use it.
+- Never guess a path that is absent from the catalog.
+- A catalog refusal is a stop condition. Do not bypass it with `find`, a whole-home scan, symlink traversal, or direct reads.
+- This bridge does not install, copy, commit, push, publish, or modify Kimi configuration.
+- Writes remain separate user-authorized work; this Skill is read-only.

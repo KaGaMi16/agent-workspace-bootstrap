@@ -165,6 +165,97 @@ class QuickstartTests(unittest.TestCase):
         self.assertTrue(claude_md.is_symlink())
         self.assertTrue(list(claude_md.parent.glob("CLAUDE.md.backup.*")))
 
+    def test_migrates_hermes_assets_and_preserves_backups(self) -> None:
+        self.make_skill(self.home / ".hermes/skills", "hermes-skill")
+        soul = self.home / ".hermes/SOUL.md"
+        soul.write_text("# Hermes rules\n", encoding="utf-8")
+        agents = self.home / ".hermes/agents"
+        agents.mkdir()
+        (agents / "reviewer.md").write_text("# Reviewer\n", encoding="utf-8")
+
+        plan = self.plan()
+        self.assertEqual(plan["verdict"], MIGRATE)
+        actions = {item["key"]: item["action"] for item in plan["portable_assets"]}
+        self.assertEqual(actions["hermes_skills"], "migrate")
+        self.assertEqual(actions["hermes_soul"], "migrate")
+        self.assertEqual(actions["hermes_agents"], "migrate")
+
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        self.assertTrue((root / "content/skills/hermes-skill/SKILL.md").is_file())
+        self.assertEqual(
+            (root / "content/settings/hermes/SOUL.md").read_text(encoding="utf-8"),
+            "# Hermes rules\n",
+        )
+        self.assertEqual(
+            (root / "content/subagent/imported/hermes/reviewer.md").read_text(encoding="utf-8"),
+            "# Reviewer\n",
+        )
+        for live, expected in (
+            (self.home / ".hermes/skills", root / "content/skills"),
+            (soul, root / "content/settings/hermes/SOUL.md"),
+            (agents, root / "content/subagent/imported/hermes"),
+        ):
+            self.assertTrue(live.is_symlink())
+            self.assertEqual(live.resolve(strict=True), expected.resolve(strict=True))
+            self.assertTrue(list(live.parent.glob(f"{live.name}.backup.*")))
+        doctor = self.run_script("doctor.py", "--home", str(self.home))
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+
+    def test_identical_hermes_skill_merges_without_conflict(self) -> None:
+        self.make_skill(self.home / ".claude/skills", "shared-skill")
+        self.make_skill(self.home / ".hermes/skills", "shared-skill")
+        plan = self.plan()
+        self.assertEqual(plan["verdict"], MIGRATE)
+        self.assertFalse(any(item["kind"] == "skill-entry-conflict" for item in plan["blockers"]))
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        self.assertTrue((root / "content/skills/shared-skill/SKILL.md").is_file())
+
+    def test_sensitive_hermes_agent_blocks_without_value_echo(self) -> None:
+        secret = "sk-" + ("J" * 24)
+        agent = self.home / ".hermes/agents/reviewer.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text(f"api_key={secret}\n", encoding="utf-8")
+        plan = self.plan()
+        encoded = json.dumps(plan)
+        self.assertEqual(plan["verdict"], BLOCKED)
+        self.assertNotIn(secret, encoded)
+        self.assertIn("openai-style-token", encoded)
+
+    def test_unreadable_hermes_agent_directory_blocks(self) -> None:
+        private = self.home / ".hermes/agents/private-subdir"
+        private.mkdir(parents=True)
+        private.chmod(0)
+        try:
+            plan = self.plan()
+        finally:
+            private.chmod(0o700)
+        self.assertEqual(plan["verdict"], BLOCKED)
+        self.assertIn("unreadable", json.dumps(plan))
+
+    def test_hermes_skill_conflict_blocks_without_writes(self) -> None:
+        self.make_skill(self.home / ".claude/skills", "collision", "claude")
+        self.make_skill(self.home / ".hermes/skills", "collision", "hermes")
+        plan = self.plan()
+        self.assertEqual(plan["verdict"], BLOCKED)
+        self.assertTrue(any(item["kind"] == "skill-entry-conflict" for item in plan["blockers"]))
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
+
+    def test_sensitive_hermes_soul_blocks_without_value_echo(self) -> None:
+        secret = "sk-" + ("H" * 24)
+        soul = self.home / ".hermes/SOUL.md"
+        soul.parent.mkdir(parents=True)
+        soul.write_text(f"api_key={secret}\n", encoding="utf-8")
+        plan = self.plan()
+        encoded = json.dumps(plan)
+        self.assertEqual(plan["verdict"], BLOCKED)
+        self.assertNotIn(secret, encoded)
+        self.assertIn("openai-style-token", encoded)
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
+
     def test_different_same_name_skills_block_without_writes(self) -> None:
         self.make_skill(self.home / ".claude/skills", "collision", "one")
         self.make_skill(self.home / ".codex/skills", "collision", "two")
@@ -172,6 +263,356 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(plan["verdict"], BLOCKED)
         self.assertTrue(any(item["kind"] == "skill-entry-conflict" for item in plan["blockers"]))
         self.assertFalse((self.home / "kgm-agent-workspace").exists())
+
+    def test_reserved_kimi_bridge_skill_name_blocks_user_content(self) -> None:
+        self.make_skill(
+            self.home / ".claude/skills",
+            "kgm-kimi-agent-workspace-bridge",
+            "untrusted replacement",
+        )
+        plan = self.plan()
+        self.assertEqual(plan["verdict"], BLOCKED)
+        self.assertIn("reserved-skill-name", json.dumps(plan))
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
+
+    def test_kimi_bridge_catalogs_only_portable_workspace_content(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        bridge = root / "content/skills/kgm-kimi-agent-workspace-bridge"
+        script = bridge / "scripts/workspace_catalog.py"
+        self.assertTrue((bridge / "SKILL.md").is_file())
+        self.assertTrue(script.is_file())
+        persona = root / "content/subagent/example-persona.md"
+        persona.write_text("# Example persona\n", encoding="utf-8")
+        private = root / "state/private-note.md"
+        private.write_text("PRIVATE_MARKER\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], 1)
+        paths = {entry["path"] for entry in payload["entries"]}
+        self.assertIn("content/skills/kgm-kimi-agent-workspace-bridge/SKILL.md", paths)
+        self.assertIn("content/settings/agents/AGENTS.md", paths)
+        self.assertIn("content/subagent/example-persona.md", paths)
+        self.assertFalse(any(path.startswith("state/") for path in paths))
+        self.assertNotIn("PRIVATE_MARKER", result.stdout)
+
+        via_environment = subprocess.run(
+            [sys.executable, "-B", str(script), "--json"],
+            text=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "KGM_AGENT_WORKSPACE_HOME": str(root),
+            },
+        )
+        self.assertEqual(via_environment.returncode, 0, via_environment.stdout + via_environment.stderr)
+        self.assertEqual(json.loads(via_environment.stdout), payload)
+
+    def test_kimi_bridge_uses_default_workspace_root(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        env = {**os.environ, "HOME": str(self.home), "PYTHONDONTWRITEBYTECODE": "1"}
+        env.pop("KGM_AGENT_WORKSPACE_HOME", None)
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--json"],
+            text=True,
+            capture_output=True,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("content/settings/hermes/SOUL.md", result.stdout)
+
+    def test_kimi_bridge_rejects_sensitive_path_names(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        unsafe_root = root / "content/subagent/unsafe-case"
+        samples = (
+            "history.txt",
+            ".history/session.md",
+            "receipt.json",
+            "SOUL.md.backup.20260920",
+            "telemetry.log",
+            "device-id.txt",
+            "access-token.json",
+            "api-secret.txt",
+            "session.json",
+            "backups/old.md",
+            "credentials/token.json",
+            "accessToken.json",
+            "apiSecret.txt",
+            "credentialStore.json",
+            "historyLog.txt",
+            "backup2026.txt",
+            "telemetryData.json",
+            "sessionData.json",
+            "deviceIdentifier.json",
+            "device_uuid.json",
+            "machine-id.json",
+            "apiKey.json",
+            "apikey.json",
+            "privateKey.json",
+            "accessKey.json",
+            "sshKey.json",
+            "oauth.json",
+            "jwt.json",
+            "bearer.json",
+            "cookie.json",
+            "hardwareId.json",
+            "hostUuid.json",
+            "systemFingerprint.json",
+            "clientGuid.json",
+            "deviceUid.json",
+            "accesstoken.json",
+            "apisecret.txt",
+            "credentialstore.json",
+            "historylog.txt",
+            "sessiondata.json",
+            "telemetrydata.json",
+            "deviceid.json",
+            "clientkey.json",
+            "signingkey.json",
+            "authtoken.json",
+            "bearertoken.json",
+            "serviceAccountKey.json",
+            "service-account-key.json",
+            "encryptionKey.json",
+            "userKey.json",
+            "serviceAccount.json",
+            "clientCertificate.pem.json",
+            "dbConnectionString.json",
+        )
+        for relative in samples:
+            with self.subTest(relative=relative):
+                target = unsafe_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("PRIVATE_MARKER\n", encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+                    text=True,
+                    capture_output=True,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("refused", result.stderr.lower())
+                self.assertNotIn("PRIVATE_MARKER", result.stdout + result.stderr)
+                shutil.rmtree(unsafe_root)
+
+    def test_kimi_bridge_allows_noncredential_lookalike_names(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        expected = {
+            "content/subagent/tokenizer-guide.md",
+            "content/subagent/secretary-persona.md",
+            "content/subagent/sessionization.md",
+        }
+        for relative in expected:
+            target = root / relative
+            target.write_text("# Portable persona\n", encoding="utf-8")
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        paths = {entry["path"] for entry in json.loads(result.stdout)["entries"]}
+        self.assertTrue(expected.issubset(paths))
+
+    def test_kimi_bridge_uses_strict_settings_and_subagent_allowlists(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        custom_setting = root / "content/settings/custom.md"
+        custom_setting.write_text("# Not registered\n", encoding="utf-8")
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        settings = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--category", "settings", "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(settings.returncode, 0, settings.stdout + settings.stderr)
+        paths = {entry["path"] for entry in json.loads(settings.stdout)["entries"]}
+        self.assertEqual(
+            paths,
+            {
+                "content/settings/agents/AGENTS.md",
+                "content/settings/claude/CLAUDE.md",
+                "content/settings/codex/AGENTS.md",
+                "content/settings/hermes/SOUL.md",
+            },
+        )
+        self.assertNotIn("content/settings/custom.md", paths)
+        self.assertNotIn("content/settings/claude/settings.json", paths)
+        self.assertNotIn("content/settings/codex/config.toml", paths)
+
+        unsupported = root / "content/subagent/notes.json"
+        unsupported.write_text("{}\n", encoding="utf-8")
+        subagents = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--category", "subagent", "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(subagents.returncode, 0)
+        self.assertIn("unsupported subagent file type", subagents.stderr.lower())
+
+    def test_kimi_bridge_rejects_unreadable_directory(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        private = root / "content/subagent/no-read"
+        private.mkdir()
+        private.chmod(0)
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+                text=True,
+                capture_output=True,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+        finally:
+            private.chmod(0o700)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unreadable", result.stderr.lower())
+
+    def test_kimi_bridge_rejects_special_file(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        fifo = root / "content/subagent/private-pipe"
+        os.mkfifo(fifo)
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("regular file", result.stderr.lower())
+
+    def test_kimi_bridge_rejects_symlink_escape(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        outside = self.base / "outside-private.md"
+        outside.write_text("OUTSIDE_PRIVATE_MARKER\n", encoding="utf-8")
+        (root / "content/subagent/escape.md").symlink_to(outside)
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr.lower())
+        self.assertNotIn("OUTSIDE_PRIVATE_MARKER", result.stdout + result.stderr)
+        self.assertNotIn(str(outside), result.stdout + result.stderr)
+
+    def test_kimi_bridge_rejects_allowlisted_setting_with_symlinked_parent(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        agents = root / "content/settings/agents"
+        agents.rename(root / "content/settings/agents-original")
+        outside = self.base / "outside-settings"
+        outside.mkdir()
+        marker = "OUTSIDE_SETTINGS_MARKER"
+        (outside / "AGENTS.md").write_text(marker + "\n", encoding="utf-8")
+        agents.symlink_to(outside, target_is_directory=True)
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--category", "settings", "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr.lower())
+        self.assertNotIn(marker, result.stdout + result.stderr)
+        self.assertNotIn(str(outside), result.stdout + result.stderr)
+
+    def test_kimi_bridge_rejects_unknown_category(self) -> None:
+        plan = self.plan()
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        root = self.home / "kgm-agent-workspace"
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(script),
+                "--root",
+                str(root),
+                "--category",
+                "state",
+                "--json",
+            ],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid choice", result.stderr)
+        self.assertNotIn("state/private", result.stdout + result.stderr)
+
+    def test_kimi_private_data_is_left_untouched_and_uncataloged(self) -> None:
+        credentials = self.home / ".kimi/credentials/account.json"
+        credentials.parent.mkdir(parents=True)
+        credential_key = "access_" + "token"
+        original = (json.dumps({credential_key: "PRIVATE_KIMI_MARKER"}) + "\n").encode()
+        credentials.write_bytes(original)
+        plan = self.plan()
+        self.assertTrue(
+            any(
+                item["provider"] == "kimi" and item["action"] == "leave-in-place"
+                for item in plan["manual_review_assets"]
+            )
+        )
+        applied = self.apply(plan)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(credentials.read_bytes(), original)
+        root = self.home / "kgm-agent-workspace"
+        self.assertFalse((root / ".kimi").exists())
+        script = root / "content/skills/kgm-kimi-agent-workspace-bridge/scripts/workspace_catalog.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(script), "--root", str(root), "--json"],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("PRIVATE_KIMI_MARKER", result.stdout + result.stderr)
+        self.assertNotIn(".kimi", result.stdout + result.stderr)
 
     def test_sensitive_setting_blocks_and_value_is_not_reported(self) -> None:
         secret = "sk-" + ("A" * 24)
@@ -360,6 +801,25 @@ class QuickstartTests(unittest.TestCase):
         self.assertEqual(len(failed), 1)
         journal = json.loads((failed[0] / "state/transaction.json").read_text())
         self.assertEqual(journal["status"], "ROLLED_BACK")
+
+    def test_final_journal_failure_restores_hermes_assets(self) -> None:
+        soul = self.home / ".hermes/SOUL.md"
+        soul.parent.mkdir(parents=True)
+        soul.write_text("# Original Hermes rules\n", encoding="utf-8")
+        agents = self.home / ".hermes/agents"
+        agents.mkdir()
+        reviewer = agents / "reviewer.md"
+        reviewer.write_text("# Original reviewer\n", encoding="utf-8")
+        plan = self.plan()
+        applied = self.apply(plan, "--fail-final-journal")
+        self.assertNotEqual(applied.returncode, 0)
+        self.assertTrue(soul.is_file())
+        self.assertFalse(soul.is_symlink())
+        self.assertEqual(soul.read_text(encoding="utf-8"), "# Original Hermes rules\n")
+        self.assertTrue(agents.is_dir())
+        self.assertFalse(agents.is_symlink())
+        self.assertEqual(reviewer.read_text(encoding="utf-8"), "# Original reviewer\n")
+        self.assertFalse((self.home / "kgm-agent-workspace").exists())
 
     def test_final_journal_failure_rolls_back_all_live_paths(self) -> None:
         claude_md = self.home / ".claude/CLAUDE.md"

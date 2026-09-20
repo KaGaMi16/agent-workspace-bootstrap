@@ -9,11 +9,13 @@ $KGM_AGENT_WORKSPACE_HOME (default: ~/kgm-agent-workspace)/
 │   └── README.md
 ├── content/
 │   ├── skills/                 # shared Skill source
+│   │   └── kgm-kimi-agent-workspace-bridge/  # read-only Kimi entry point
 │   ├── settings/
 │   │   ├── claude/
 │   │   ├── codex/
+│   │   ├── hermes/
 │   │   └── agents/
-│   └── subagent/
+│   └── subagent/imported/hermes/
 ├── state/                      # inventory, transaction receipts, private state
 ├── .gitignore                  # excludes state, backups, caches, credentials
 ├── AGENTS.md
@@ -34,9 +36,16 @@ $KGM_AGENT_WORKSPACE_HOME (default: ~/kgm-agent-workspace)/
 ~/.codex/AGENTS.md      -> ~/kgm-agent-workspace/content/settings/codex/AGENTS.md
 ~/.codex/config.toml    -> ~/kgm-agent-workspace/content/settings/codex/config.toml
 ~/.agents/AGENTS.md     -> ~/kgm-agent-workspace/content/settings/agents/AGENTS.md
+~/.hermes/skills       -> ~/kgm-agent-workspace/content/skills
+~/.hermes/SOUL.md      -> ~/kgm-agent-workspace/content/settings/hermes/SOUL.md
+~/.hermes/agents       -> ~/kgm-agent-workspace/content/subagent/imported/hermes
 ```
 
 Absent paths may be linked to the generated placeholders. Existing supported paths are copied into staging, preserved as timestamped backups, and replaced only after the approved snapshot is revalidated.
+
+## Kimi bridge
+
+Kimi is supported indirectly through `content/skills/kgm-kimi-agent-workspace-bridge`. The bridge uses a self-contained catalog script to return only `SKILL.md` manifests, four shared rule documents, and Markdown persona/subagent files as relative paths. Runtime configuration is excluded. It does not link, copy, or inspect `.kimi`, and it does not depend on a private Kimi directory layout. The reserved bridge name cannot be replaced by migrated user content.
 
 ## Transaction boundary
 

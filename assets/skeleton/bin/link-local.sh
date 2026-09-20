@@ -13,6 +13,9 @@ targets=(
   "${CODEX_AGENTS_TARGET:-$HOME/.codex/AGENTS.md}"
   "${CODEX_CONFIG_TARGET:-$HOME/.codex/config.toml}"
   "${AGENTS_RULES_TARGET:-$HOME/.agents/AGENTS.md}"
+  "${HERMES_SKILLS_DIR:-$HOME/.hermes/skills}"
+  "${HERMES_SOUL_TARGET:-$HOME/.hermes/SOUL.md}"
+  "${HERMES_AGENTS_DIR:-$HOME/.hermes/agents}"
 )
 sources=(
   "$root/content/skills"
@@ -24,6 +27,9 @@ sources=(
   "$root/content/settings/codex/AGENTS.md"
   "$root/content/settings/codex/config.toml"
   "$root/content/settings/agents/AGENTS.md"
+  "$root/content/skills"
+  "$root/content/settings/hermes/SOUL.md"
+  "$root/content/subagent/imported/hermes"
 )
 labels=(
   "claude skills"
@@ -35,6 +41,9 @@ labels=(
   "codex instructions"
   "codex settings"
   "generic instructions"
+  "hermes skills"
+  "hermes instructions"
+  "hermes agents"
 )
 actions=()
 

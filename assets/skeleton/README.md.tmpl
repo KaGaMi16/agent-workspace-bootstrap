@@ -18,7 +18,10 @@ The installer preserved every replaced original as a timestamped sibling backup.
 - Rebuild the index: `python3 -B control/bin/rebuild-claude-md.py`
 - Validate Skills: `bash control/bin/validate-skills.sh`
 - Repair missing links: `bash control/bin/link-local.sh`
+- Use from Kimi: install `content/skills/kgm-kimi-agent-workspace-bridge` through Kimi's normal Skill installation flow
 
 `link-local.sh` never imports or replaces an unexpected existing path. Inventory and migration belong to the `kgm-agent-workspace-bootstrap` Skill so they always use a reviewed plan digest.
 
 If installation was interrupted by a crash or power loss, do not relink manually. Run the Skill's `scripts/scaffold.py --recover-root <this-folder>` command so it validates the private write-ahead journal and restores the original paths.
+
+Claude Code, Codex, `.agents`, and Hermes use registered links. Kimi uses the generated read-only bridge Skill. It exposes Skill manifests, four shared rule documents, and Markdown persona/subagent files—not runtime configuration—and does not inspect or change `.kimi`.

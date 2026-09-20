@@ -9,6 +9,7 @@ This folder is the local control plane for shared Agent assets.
 - Generated caches and host-specific runtime files are not source.
 - Do not scan the whole home directory. Extend the registered host inventory deliberately and test it.
 - Do not resolve conflicting assets by guessing. Stop and ask the owner.
+- The Kimi bridge may return only Skill manifests, allowlisted shared rule documents, and Markdown persona/subagent files under `content/`. It must never read `state/`, `.kimi`, or runtime configuration.
 - Do not commit, add a remote, push, or publish without separate user approval.
 
 ## Maintenance

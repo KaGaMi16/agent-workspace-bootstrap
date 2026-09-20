@@ -21,7 +21,8 @@ DRY = "DRY"
 MIGRATE = "MIGRATE"
 BLOCKED = "BLOCKED"
 EXIT_CODES = {DRY: 0, BLOCKED: 1, MIGRATE: 3}
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+RESERVED_SKILL_NAMES = {"kgm-kimi-agent-workspace-bridge"}
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,16 @@ PORTABLE_SPECS = (
     AssetSpec("codex_agents", "codex", ".codex/AGENTS.md", "content/settings/codex/AGENTS.md", "PORTABLE"),
     AssetSpec("codex_config", "codex", ".codex/config.toml", "content/settings/codex/config.toml", "PORTABLE"),
     AssetSpec("agents_rules", "agents", ".agents/AGENTS.md", "content/settings/agents/AGENTS.md", "PORTABLE"),
+    AssetSpec("hermes_skills", "hermes", ".hermes/skills", "content/skills", "PORTABLE", "skills"),
+    AssetSpec("hermes_soul", "hermes", ".hermes/SOUL.md", "content/settings/hermes/SOUL.md", "PORTABLE"),
+    AssetSpec(
+        "hermes_agents",
+        "hermes",
+        ".hermes/agents",
+        "content/subagent/imported/hermes",
+        "PORTABLE",
+        "directory",
+    ),
 )
 
 PRIVATE_SPECS = (
@@ -55,9 +66,6 @@ MANUAL_SPECS = (
     AssetSpec("claude_agents", "claude", ".claude/agents", None, "MANUAL_REVIEW", "directory"),
     AssetSpec("codex_agents_dir", "codex", ".codex/agents", None, "MANUAL_REVIEW", "directory"),
     AssetSpec("codex_hooks", "codex", ".codex/hooks.json", None, "MANUAL_REVIEW"),
-    AssetSpec("hermes_skills", "hermes", ".hermes/skills", None, "MANUAL_REVIEW", "directory"),
-    AssetSpec("hermes_agents", "hermes", ".hermes/agents", None, "MANUAL_REVIEW", "directory"),
-    AssetSpec("hermes_soul", "hermes", ".hermes/SOUL.md", None, "MANUAL_REVIEW"),
     AssetSpec("kimi_root", "kimi", ".kimi", None, "MANUAL_REVIEW", "directory"),
     AssetSpec("kimi_config", "kimi", ".config/kimi", None, "MANUAL_REVIEW", "directory"),
     AssetSpec("opencode_config", "opencode", ".config/opencode", None, "MANUAL_REVIEW", "directory"),
@@ -317,6 +325,15 @@ def merge_skill_entries(records: list[dict]) -> tuple[dict, list[dict]]:
             collisions.append({"kind": "case-or-unicode-name-conflict", "name": sorted(names), "paths": paths})
 
     for name, entries in sorted(by_name.items()):
+        if name in RESERVED_SKILL_NAMES:
+            collisions.append(
+                {
+                    "kind": "reserved-skill-name",
+                    "name": name,
+                    "paths": [entry["source"] for entry in entries],
+                }
+            )
+            continue
         fingerprints = {entry["fingerprint"] for entry in entries}
         if len(fingerprints) > 1:
             collisions.append(

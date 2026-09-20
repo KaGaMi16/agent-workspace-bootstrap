@@ -1,6 +1,6 @@
 # kgm-agent-workspace-bootstrap
 
-A Codex/Claude Skill that builds a local agent workspace and safely consolidates existing agent assets.
+A Codex/Claude/Hermes Skill that builds a local agent workspace and safely consolidates existing agent assets. Kimi uses the generated bridge Skill instead of exposing its private runtime directory.
 
 It creates:
 
@@ -14,7 +14,7 @@ It creates:
 └── state/          # private and excluded from Git
 ```
 
-The Skill supports macOS and Linux. It fully handles registered Claude Code, Codex, and `.agents` paths. Other tools are discovered conservatively and left untouched for manual review.
+The Skill supports macOS and Linux. It fully handles registered Claude Code, Codex, Hermes, and `.agents` paths. It also generates `kgm-kimi-agent-workspace-bridge`, a read-only Kimi entry point that catalogs portable workspace content without reading `.kimi` or `state/`. Other tools are discovered conservatively and left untouched for manual review.
 
 ## Safety model
 
@@ -26,6 +26,7 @@ The Skill supports macOS and Linux. It fully handles registered Claude Code, Cod
 - The approved inventory and a write-ahead transaction journal are kept under private `state/` with owner-only permissions.
 - Failed link operations are rolled back. After a process crash or power loss, `scaffold.py --recover-root <agent-workspace-root>` restores from the journal before any retry.
 - No automatic Git commit, remote, push, or GitHub publication.
+- Kimi credentials, history, telemetry, device identifiers, and configuration are never read or migrated.
 
 ## Install
 
@@ -34,6 +35,8 @@ Place this folder in a supported Skill directory, then ask your agent:
 ```text
 Use $kgm-agent-workspace-bootstrap to inventory this machine and show me the migration plan. Do not change files until I approve the plan digest.
 ```
+
+After scaffolding, a Kimi user can install the generated `content/skills/kgm-kimi-agent-workspace-bridge` through Kimi's normal Skill installation flow. The bridge lists only Skill manifests, four shared rule documents, and Markdown persona/subagent files. Runtime configuration files are excluded. It stops on symlinks, unsafe filesystem entries, credential-like names, or unsupported subagent file types.
 
 ## Development
 

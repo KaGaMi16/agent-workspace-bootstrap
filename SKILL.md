@@ -1,6 +1,6 @@
 ---
 name: kgm-agent-workspace-bootstrap
-description: "Build a local agent workspace with shared skills, settings, and subagent content while keeping credentials, memory, backups, and machine state private. Use when someone wants to bootstrap ~/kgm-agent-workspace on macOS/Linux or safely inventory and consolidate existing Claude Code, Codex, or .agents assets. Always inventory first, show the exact migration plan, require approval of its digest, preserve originals as backups, and verify the result. Do not use for GPU, cluster, model-serving, or other AI infrastructure; installing agent CLIs; scanning an entire home directory; silently resolving conflicting assets; publishing to GitHub; multi-machine sync; Windows; or copying another person's private rules/personas."
+description: "Build a local agent workspace with shared skills, settings, and subagent content while keeping credentials, memory, backups, and machine state private. Use when someone wants to bootstrap ~/kgm-agent-workspace on macOS/Linux, safely consolidate existing Claude Code, Codex, Hermes, or .agents assets, or create the read-only Kimi bridge Skill. Always inventory first, show the exact migration plan, require approval of its digest, preserve originals as backups, and verify the result. Do not use for GPU, cluster, model-serving, or other AI infrastructure; installing agent CLIs; scanning an entire home directory; silently resolving conflicting assets; publishing to GitHub; multi-machine sync; Windows; copying another person's private rules/personas; or migrating Kimi private data."
 license: MIT
 metadata:
   short-description: Build and consolidate a local agent workspace safely
@@ -26,6 +26,7 @@ Read [references/architecture.md](references/architecture.md) for the exact layo
 3. If the verdict is `BLOCKED`, stop. If it is `DRY` or `MIGRATE`, show the exact plan and get approval for that digest before any live write.
 4. Save the JSON report, then run `scripts/scaffold.py --plan-file <file> --approve-digest <digest>`. It must recompute the current snapshot and refuse any drift.
 5. Run `scripts/doctor.py` immediately. Report every PASS/FAIL line. A failed doctor means the job is not complete. If an earlier apply was interrupted, run `scripts/scaffold.py --recover-root <agent-workspace-root>` before creating a new plan.
+6. For Kimi, install the generated `content/skills/kgm-kimi-agent-workspace-bridge` through Kimi's normal Skill installation flow. The bridge is read-only and must stop if its catalog script refuses the workspace.
 
 ## Asset policy
 
@@ -36,6 +37,8 @@ Read [references/architecture.md](references/architecture.md) for the exact layo
 - Generated caches and VCS metadata never migrate.
 
 The scaffold never commits, adds a Git remote, pushes, or publishes. Those are separate user-authorized actions.
+
+Hermes Skills, `SOUL.md`, and agents are registered portable inputs. Kimi is deliberately different: this Skill never reads or migrates `.kimi`; it generates one bridge Skill that returns only Skill manifests, allowlisted shared rule documents, and Markdown persona/subagent files by relative path. Runtime configuration is not exposed to Kimi.
 
 ## Public release
 
@@ -50,3 +53,4 @@ The repository root's own `.git` metadata is excluded so a normal fresh clone ca
 - The approved plan digest differs from the current snapshot.
 - A rollback cannot restore every changed source path.
 - The operating system is not macOS or Linux.
+- A user-provided Skill attempts to replace the reserved `kgm-kimi-agent-workspace-bridge` name.

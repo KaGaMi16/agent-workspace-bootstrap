@@ -115,6 +115,9 @@ def scan_path(root: Path) -> list[dict[str, str]]:
                 findings.append(_finding("group-writable", path, rel_root))
             if mode & stat.S_IWOTH:
                 findings.append(_finding("world-writable", path, rel_root))
+            required = stat.S_IRUSR | stat.S_IXUSR
+            if mode & required != required or not os.access(path, os.R_OK | os.X_OK):
+                findings.append(_finding("unreadable", path, rel_root))
             continue
         if not stat.S_ISREG(mode):
             findings.append(_finding("special-file", path, rel_root))
@@ -128,7 +131,7 @@ def scan_path(root: Path) -> list[dict[str, str]]:
         if path.name in SENSITIVE_NAMES or path.suffix.lower() in SENSITIVE_SUFFIXES:
             findings.append(_finding("sensitive-file-name", path, rel_root))
             continue
-        if not os.access(path, os.R_OK):
+        if not mode & stat.S_IRUSR or not os.access(path, os.R_OK):
             findings.append(_finding("unreadable", path, rel_root))
             continue
 
